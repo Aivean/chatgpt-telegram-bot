@@ -20,20 +20,20 @@ logging.basicConfig(
 
 telegram_token = os.environ["TELEGRAM_TOKEN"]
 openai.api_key = os.environ["OPENAI_TOKEN"]
-allowed_usernames = [x.strip() for x in os.environ["ALLOWED_USERNAMES"].split(',') if x.strip()]
+allowed_user_ids = set(int(x.strip()) for x in os.environ["ALLOWED_USER_IDS"].split(',') if x.strip())
 
 messages_list = {}
 logger = logging.getLogger(__name__)
 
 
-def is_allowed_user(username):
-    return len(allowed_usernames) == 0 or username in allowed_usernames
+def is_allowed_user(user_id):
+    return len(allowed_user_ids) == 0 or user_id in allowed_user_ids
 
 
-async def handle_allowed_usernames(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received message from {update.message.from_user.username}")
+async def handle_allowed_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received message from {update.message.from_user.id}")
 
-    if not is_allowed_user(update.message.from_user.username):
+    if not is_allowed_user(update.message.from_user.id):
         await context.bot.send_message(
           chat_id=update.effective_chat.id,
           text="Sorry, you are not allowed to use this bot",
@@ -42,10 +42,10 @@ async def handle_allowed_usernames(update: Update, context: ContextTypes.DEFAULT
     return True
 
 
-def append_history(username, content, role):
-    if username not in messages_list:
-        messages_list[username] = []
-    msg_list = messages_list.get(username, [])
+def append_history(user_id, content, role):
+    if user_id not in messages_list:
+        messages_list[user_id] = []
+    msg_list = messages_list.get(user_id, [])
 
     msg_list.append({"role": role, "content": content})
 
@@ -60,12 +60,12 @@ def append_history(username, content, role):
     return msg_list
 
 
-def clear_history(username):
-    messages_list.get(username, []).clear()
+def clear_history(user_id):
+    messages_list.get(user_id, []).clear()
 
 
 async def process_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await handle_allowed_usernames(update, context):
+    if not await handle_allowed_users(update, context):
         return
 
     thinking = await context.bot.send_message(
@@ -76,11 +76,11 @@ async def process_text_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.message.reply_to_message:
         msg_text = "> " + update.message.reply_to_message.text + " \n\n" + msg_text
 
-    append_history(update.message.from_user.username, msg_text, "user")
+    append_history(update.message.from_user.id, msg_text, "user")
 
-    response = generate_gpt_response(update.message.from_user.username)
+    response = generate_gpt_response(update.message.from_user.id)
 
-    append_history(update.message.from_user.username, response, "assistant")
+    append_history(update.message.from_user.id, response, "assistant")
     await context.bot.deleteMessage(
         message_id=thinking.message_id, chat_id=update.message.chat_id
     )
@@ -88,24 +88,24 @@ async def process_text_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def process_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await handle_allowed_usernames(update, context):
+    if not await handle_allowed_users(update, context):
         return
 
     transcript = await get_audio_transcription(update, context)
-    append_history(update.message.from_user.username, transcript, "user")
+    append_history(update.message.from_user.id, transcript, "user")
 
-    response = generate_gpt_response(update.message.from_user.username)
+    response = generate_gpt_response(update.message.from_user.id)
 
-    append_history(update.message.from_user.username, response, "assistant")
+    append_history(update.message.from_user.id, response, "assistant")
     await context.bot.send_message(chat_id=update.effective_chat.id, text=response)
 
 
-def generate_gpt_response(username):
+def generate_gpt_response(user_id):
     try:
         completion = openai.ChatCompletion.create(
             model="gpt-4",
             n=1,
-            messages=messages_list.get(username, []),
+            messages=messages_list.get(user_id, []),
             timeout=80,
             request_timeout=60
         )
@@ -139,10 +139,10 @@ async def get_audio_transcription(update, context):
 
 
 async def reset_history(update, context):
-    if not await handle_allowed_usernames(update, context):
+    if not await handle_allowed_users(update, context):
         return
 
-    clear_history(update.message.from_user.username)
+    clear_history(update.message.from_user.id)
     await context.bot.send_message(
         chat_id=update.effective_chat.id, text="Messages history cleaned"
     )
